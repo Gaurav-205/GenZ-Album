@@ -30,12 +30,6 @@ const app: Express = express();
 // This enables Express to correctly identify the client's IP address
 app.set('trust proxy', 1);
 
-// Connect to database (required for authentication)
-connectDatabase().catch((error) => {
-  logger.error('Failed to connect to database', error);
-  process.exit(1);
-});
-
 // Request ID middleware (must be early to track all requests)
 app.use(requestId);
 
@@ -197,37 +191,64 @@ app.use('/api', routes);
 app.use(notFound);
 app.use(errorHandler);
 
-// Start server
-const PORT = config.port;
-
-const server = app.listen(PORT, () => {
-  logger.info(`Server is running on http://localhost:${PORT}`);
-  logger.info(`Environment: ${config.nodeEnv}`);
-  logger.info(`Frontend URL: ${config.frontend.url}`);
-  
-  // Log email service status (check matches emailService.ts logic)
-  const hasEmailUser = config.email.user && config.email.user.trim() !== '';
-  const hasEmailPass = config.email.pass && config.email.pass.trim() !== '';
-  
-  if (hasEmailUser && hasEmailPass) {
-    logger.info('Email service: Configured ✓');
-    logger.debug(`Email host: ${config.email.host}:${config.email.port}`);
-    logger.debug(`Email from: ${config.email.from}`);
-  } else {
-    logger.warn('Email service: Not configured (password reset links will appear in console)');
-    logger.warn('To enable email service, add EMAIL_USER and EMAIL_PASS to backend/.env file');
-    if (process.env.NODE_ENV === 'development') {
-      logger.info(`   EMAIL_USER from env: ${process.env.EMAIL_USER ? `"${process.env.EMAIL_USER}"` : 'NOT SET'}`);
-      logger.info(`   EMAIL_PASS from env: ${process.env.EMAIL_PASS ? 'SET (hidden)' : 'NOT SET'}`);
-      logger.info(`   config.email.user: ${config.email.user ? `"${config.email.user}"` : 'empty'}`);
-      logger.info(`   config.email.pass: ${config.email.pass ? 'SET (hidden)' : 'empty'}`);
-    }
+// Start server - wrapped in async function to await database connection
+(async () => {
+  try {
+    // Connect to database (required for authentication)
+    // This must complete before the server starts accepting requests
+    await connectDatabase();
+    logger.info('Database connection established');
+  } catch (error) {
+    logger.error('Failed to connect to database', error);
+    process.exit(1);
   }
-});
+
+  // Start server after database connection is established
+  const PORT = config.port;
+
+  const server = app.listen(PORT, () => {
+    logger.info(`Server is running on http://localhost:${PORT}`);
+    logger.info(`Environment: ${config.nodeEnv}`);
+    logger.info(`Frontend URL: ${config.frontend.url}`);
+    
+    // Log email service status (check matches emailService.ts logic)
+    const hasEmailUser = config.email.user && config.email.user.trim() !== '';
+    const hasEmailPass = config.email.pass && config.email.pass.trim() !== '';
+    
+    if (hasEmailUser && hasEmailPass) {
+      logger.info('Email service: Configured ✓');
+      logger.debug(`Email host: ${config.email.host}:${config.email.port}`);
+      logger.debug(`Email from: ${config.email.from}`);
+    } else {
+      logger.warn('Email service: Not configured (password reset links will appear in console)');
+      logger.warn('To enable email service, add EMAIL_USER and EMAIL_PASS to backend/.env file');
+      if (process.env.NODE_ENV === 'development') {
+        logger.info(`   EMAIL_USER from env: ${process.env.EMAIL_USER ? `"${process.env.EMAIL_USER}"` : 'NOT SET'}`);
+        logger.info(`   EMAIL_PASS from env: ${process.env.EMAIL_PASS ? 'SET (hidden)' : 'NOT SET'}`);
+        logger.info(`   config.email.user: ${config.email.user ? `"${config.email.user}"` : 'empty'}`);
+        logger.info(`   config.email.pass: ${config.email.pass ? 'SET (hidden)' : 'empty'}`);
+      }
+    }
+  });
+
+  // Export server for graceful shutdown handlers
+  (global as any).__server = server;
+})();
 
 // Graceful shutdown handler for production
 const gracefulShutdown = (signal: string): void => {
   logger.info(`${signal} received. Starting graceful shutdown...`);
+  
+  const server = (global as any).__server;
+  if (!server) {
+    logger.warn('Server not initialized, exiting...');
+    mongoose.connection.close().then(() => {
+      process.exit(0);
+    }).catch(() => {
+      process.exit(1);
+    });
+    return;
+  }
   
   server.close(() => {
     logger.info('HTTP server closed.');

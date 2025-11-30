@@ -55,7 +55,8 @@ if (useSendGridAPI && emailPass.startsWith('SG.')) {
   }
 }
 
-const transporter = hasEmailConfig
+// Only create transporter if NOT using SendGrid API (SendGrid uses REST API, not SMTP)
+const transporter = hasEmailConfig && !useSendGridAPI
   ? nodemailer.createTransport({
       host: config.email.host,
       port: config.email.port,
@@ -71,10 +72,10 @@ const transporter = hasEmailConfig
     })
   : null;
 
-// Verify transporter connection on startup (only if configured)
+// Verify transporter connection on startup (only if using SMTP, not SendGrid API)
 // Skip verification in production as network restrictions may prevent it
 // Actual email sending will handle errors gracefully
-if (hasEmailConfig && transporter && process.env.NODE_ENV !== 'production') {
+if (hasEmailConfig && !useSendGridAPI && transporter && process.env.NODE_ENV !== 'production') {
   // Set a timeout for verification (5 seconds)
   const verifyTimeout = setTimeout(() => {
     logger.debug('Email verification timeout - this is normal if SMTP connections are restricted');
@@ -89,8 +90,10 @@ if (hasEmailConfig && transporter && process.env.NODE_ENV !== 'production') {
       logger.info('Email service connection verified successfully');
     }
   });
-} else if (hasEmailConfig && transporter && process.env.NODE_ENV === 'production') {
+} else if (hasEmailConfig && !useSendGridAPI && transporter && process.env.NODE_ENV === 'production') {
   logger.info('Email service configured (verification skipped in production)');
+} else if (hasEmailConfig && useSendGridAPI) {
+  logger.debug('Email service using SendGrid API - SMTP verification not needed');
 }
 
 // Export function to check if email is configured

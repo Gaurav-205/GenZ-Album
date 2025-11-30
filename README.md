@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Full-Stack Authentication Template
 
 A production-ready authentication template with Next.js frontend and Express backend. Perfect starting point for your next project.
@@ -113,3 +114,6 @@ Visit http://localhost:3000
 ## 📝 License
 
 MIT License - see [LICENSE](LICENSE) file for details.
+=======
+# GenZ-Album
+>>>>>>> origin/main
